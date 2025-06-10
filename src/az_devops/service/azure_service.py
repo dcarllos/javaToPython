@@ -30,25 +30,56 @@ class AzureDevopsService:
             raise Exception(f"Failed to fetch repositories. Status code: {response.status_code}, {response.text}")
 
         repositories = response.json().get("value", [])
-        rows = []
-        rows.append(["Project name", "Repository name", "File extension"])
+        rows = [["Project name", "Repository name", "Branch", "File extension", "Count"]]
 
         for repo in repositories:
-            print(f"Processing repository {repo['project']['name']} / {repo['name']}")
-            extensions = self.get_repository_extensions(
-                project=repo["project"]["name"],
-                repo_id=repo["id"],
-                base_url=base_url,
-                headers=headers
-            )
-            print(f"[DEBUG] Extensões encontradas para {repo['name']}: {extensions}")
-            for ext in extensions:
-                rows.append([
-                    repo["project"]["name"],
-                    repo["name"],
-                    ext
-                ])
-
+            project_name = repo["project"]["name"]
+            repo_name = repo["name"]
+            repo_id = repo["id"]
+        
+            # 1) Buscar todas as branches do repositório
+            refs_url = f"{base_url}/{project_name}/_apis/git/repositories/{repo_id}/refs"
+            params_refs = {
+                "filter": "heads/",        # pega apenas refs/heads/*
+                "api-version": "6.0"
+            }
+            resp_refs = requests.get(refs_url, headers=headers, params=params_refs, verify=False)
+            branches = [
+                ref["name"].split("/")[-1] 
+                for ref in resp_refs.json().get("value", [])
+            ]
+        
+            for branch in branches:
+                # 2) Listar todos os arquivos dessa branch
+                items_url = f"{base_url}/{project_name}/_apis/git/repositories/{repo_id}/items"
+                params_items = {
+                    "recursionLevel": "Full",
+                    "includeContentMetadata": "true",
+                    "versionType": "branch",
+                    "version": branch,
+                    "api-version": "6.0"
+                }
+                resp_items = requests.get(items_url, headers=headers, params=params_items, verify=False)
+                items = resp_items.json().get("value", [])
+        
+                # 3) Contar arquivos por extensão
+                ext_counter = Counter()
+                for item in items:
+                    if item.get("gitObjectType") == "blob":
+                        _, ext = os.path.splitext(item.get("path", ""))
+                        if ext:
+                            ext_counter[ext.lower()] += 1
+        
+                # 4) Adicionar ao CSV
+                for ext, count in ext_counter.items():
+                    rows.append([
+                        project_name,
+                        repo_name,
+                        branch,
+                        ext,
+                        count
+                    ])
+        
         return rows
 
     def get_repository_extensions(self,project, repo_id, base_url, headers):
