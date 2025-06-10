@@ -4,7 +4,7 @@ from az_devops.generate.azure_detail import build_repository_metrics_entry
 from az_devops.connection.azure_connection import get_azure_connection_cloud, get_azure_connection_legacy
 from az_devops.metric.azure_metrics import extract_repositories_metrics_and_versions
 from az_devops.settings.azure_settings import Settings
-
+from collections import Counter
 
 class AzureDevopsService:
     def __init__(self):
