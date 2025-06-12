@@ -1,4 +1,5 @@
 import requests
+import logging
 import os
 from az_devops.generate.azure_detail import build_repository_metrics_entry
 from az_devops.connection.azure_connection import get_azure_connection_cloud, get_azure_connection_legacy
@@ -21,13 +22,19 @@ class AzureDevopsService:
            raise ValueError("Unknown environment: {environment}")
 
     def get_all_azure_devops_repositories(self):
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(message)s"
+        )
+
         connection = self._select_connection()
         base_url, headers, _ = connection
         url = f"{base_url}/_apis/git/repositories?api-version=5.1"
         response = requests.get(url, headers=headers, verify=False)
 
         if response.status_code != 200:
-            raise Exception(f"Failed to fetch repositories. Status code: {response.status_code}, {response.text}")
+            logging.error(f"Falha ao buscar repositórios: {response.status_code} {response.text}")
+            raise Exception("...")
 
         repositories = response.json().get("value", [])
         rows = [["Project name", "Repository name", "Branch", "File extension", "Count"]]
@@ -36,20 +43,23 @@ class AzureDevopsService:
             project_name = repo["project"]["name"]
             repo_name = repo["name"]
             repo_id = repo["id"]
+            logging.info(f"--> Repositório: {project_name}/{repo_name} (id={repo_id})")
         
             # 1) Buscar todas as branches do repositório
             refs_url = f"{base_url}/{project_name}/_apis/git/repositories/{repo_id}/refs"
             params_refs = {
                 "filter": "heads/",        # pega apenas refs/heads/*
-                "api-version": "6.0"
+                "api-version": "5.1"
             }
             resp_refs = requests.get(refs_url, headers=headers, params=params_refs, verify=False)
             branches = [
                 ref["name"].split("/")[-1] 
                 for ref in resp_refs.json().get("value", [])
             ]
+
         
             for branch in branches:
+                # logging.info(f" Branches encontradas: {branches}")
                 # 2) Listar todos os arquivos dessa branch
                 items_url = f"{base_url}/{project_name}/_apis/git/repositories/{repo_id}/items"
                 params_items = {
@@ -57,11 +67,14 @@ class AzureDevopsService:
                     "includeContentMetadata": "true",
                     "versionType": "branch",
                     "version": branch,
-                    "api-version": "6.0"
+                    "api-version": "5.1"
                 }
-                resp_items = requests.get(items_url, headers=headers, params=params_items, verify=False)
-                items = resp_items.json().get("value", [])
-        
+                try:
+                    resp_items = requests.get(items_url, headers=headers, params=params_items, verify=False)
+                    items = resp_items.json().get("value", [])
+                except requests.RequestException as e:
+                    logging.error(f"Erro ao listar itens da branch: {e}")
+
                 # 3) Contar arquivos por extensão
                 ext_counter = Counter()
                 for item in items:
@@ -87,7 +100,7 @@ class AzureDevopsService:
         params = {
             "recursionLevel": "Full",
             "includeContentMetadata": "true",
-            "api-version": "6.0"
+            "api-version": "5.1"
         }
         response = requests.get(url, headers=headers, params=params, verify=False)
         if response.status_code != 200:
